@@ -53,6 +53,10 @@ flags.DEFINE_string(
     "output_dir", None,
     "The output directory where the model checkpoints will be written.")
 
+flags.DEFINE_string(
+    "export_dir", None,
+    "The dir where the exported model will be written.")
+
 ## Other parameters
 
 flags.DEFINE_string(
@@ -77,6 +81,10 @@ flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
 flags.DEFINE_bool(
     "do_predict", False,
     "Whether to run the model in inference mode on the test set.")
+
+flags.DEFINE_bool(
+    "do_export", False,
+    "Whether to export the model.")
 
 flags.DEFINE_integer("train_batch_size", 64, "Total batch size for training.")
 
@@ -167,7 +175,6 @@ class GECInputExample(object):
     self.input_sequence = input_sequence
     self.edit_sequence = edit_sequence
 
-
 class GECInputFeatures(object):
   def __init__(self, input_sequence, input_mask, segment_ids, edit_sequence):
     self.input_sequence = input_sequence
@@ -175,7 +182,6 @@ class GECInputFeatures(object):
     self.segment_ids = segment_ids
     #self.label_id = label_id
     self.edit_sequence = edit_sequence
-
 
 class DataProcessor(object):
   """Base class for data converters for sequence classification data sets."""
@@ -197,7 +203,6 @@ class DataProcessor(object):
     """Reads a tab separated value file."""
     with tf.gfile.Open(input_file, "r") as f:
       return (line for line in f)
-
 
 class GECProcessor(DataProcessor):
   def get_train_examples(self, data_dir):
@@ -381,7 +386,6 @@ def edit_word_embedding_lookup(embedding_table, input_ids,
   else:
     output = tf.nn.embedding_lookup(embedding_table, input_ids)
   return output
-
 
 def gec_create_model(bert_config, is_training, input_sequence, 
   input_mask, segment_ids, edit_sequence, 
@@ -568,7 +572,6 @@ def gec_create_model(bert_config, is_training, input_sequence,
 
     return (loss, per_example_loss, logits, probs)
 
-
 def replacement_minus_replaced_logits(replace_layer, word_embedded_input, weights):
   result_1 = tf.matmul(replace_layer, weights, transpose_b=True)
   result_2 = replace_layer * word_embedded_input
@@ -625,13 +628,12 @@ def gec_model_fn_builder(bert_config, init_checkpoint, learning_rate,
       else:
         tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
-    tf.logging.info("**** Trainable Variables ****")
-    for var in tvars:
-      init_string = ""
-      if var.name in initialized_variable_names:
-        init_string = ", *INIT_FROM_CKPT*"
-      tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
-                      init_string)
+    # tf.logging.info("**** Trainable Variables ****")
+    # for var in tvars:
+    #   init_string = ""
+    #   if var.name in initialized_variable_names:
+    #     init_string = ", *INIT_FROM_CKPT*"
+    #   tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape, init_string)
 
     output_spec = None
     if mode == tf.estimator.ModeKeys.TRAIN:
@@ -683,12 +685,26 @@ def get_file_length(file_address):
   num_lines = sum(1 for line in tf.gfile.GFile(file_address,"r"))
   return num_lines
 
+def serving_input_fn():
+    edit_sequence = tf.placeholder(tf.int64, [None, FLAGS.max_seq_length], name='edit_sequence')
+    input_sequence = tf.placeholder(tf.int64, [None, FLAGS.max_seq_length], name='input_sequence')
+    input_mask = tf.placeholder(tf.int64, [None, FLAGS.max_seq_length], name='input_mask')
+    segment_ids = tf.placeholder(tf.int64, [None, FLAGS.max_seq_length], name='segment_ids')
+    
+    input_fn = tf.estimator.export.build_raw_serving_input_receiver_fn({
+        'edit_sequence': edit_sequence,
+        'input_sequence': input_sequence,
+        'input_mask': input_mask,
+        'segment_ids': segment_ids,
+    })()
+
+    return input_fn
 
 def main(_): 
 
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
+  if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict and not FLAGS.do_export:
     raise ValueError(
         "At least one of `do_train`, `do_eval` or `do_predict' must be True.")
 
@@ -718,8 +734,15 @@ def main(_):
     tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
+  session_config = tf.ConfigProto(
+    inter_op_parallelism_threads=0,
+    intra_op_parallelism_threads=0,
+    allow_soft_placement=True,
+    gpu_options=tf.GPUOptions(allow_growth=True))
+
   is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
   run_config = tf.contrib.tpu.RunConfig(
+      session_config=session_config,
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
       model_dir=FLAGS.output_dir,
@@ -899,6 +922,10 @@ def main(_):
     #with tf.gfile.GFile(output_logits_file,"w") as writer:
       #np.save(writer,np.array(logits_array))
     tf.logging.info("Decoding time: {}".format(total_time_per_step))
+
+  if FLAGS.do_export:
+    estimator._export_to_tpu = False
+    estimator.export_savedmodel(FLAGS.export_dir, serving_input_fn, checkpoint_path=FLAGS.predict_checkpoint)
 
 
 if __name__ == "__main__":
