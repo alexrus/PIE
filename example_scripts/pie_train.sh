@@ -1,16 +1,16 @@
 cd ..
 
-if [ $# -ne 4 ]
+if [ $# -ne 2 ]
  then
     echo "Illegal number of parameters"
     exit 1
 fi
 
 ensemble_id=$1
-use_tpu=True
+use_tpu=False
 copy_weight=$2
-random_seed=$3
-tpu_name=$4
+random_seed=12
+tpu_name=ttppuu
 
 learning_rate=2e-5
 mode=large

@@ -2,9 +2,14 @@ env
 __pycache__
 export
 PIE_ckpt/pie_model.*
+PIE_ckpt/bert_model.*
 .DS_Store
 scratch/multi_round_*
 test_results.txt
 test_incorr.txt
 predict_0.tf_record
 output_tokens.txt
+DS
+scratch/pickles
+scratch/output_*
+scratch/train_*
